@@ -4,28 +4,30 @@ use std::fs;
 use teloxide::prelude::*;
 
 struct Config {
-    pub length: u32,
     pub filename: String,
+    pub length: u32,
 }
 
 impl Config {
-    pub fn new(message: String) -> Result<Self, String> {
-        let mut args = message.split_whitespace();
-
-        let length: u32 = match args.next() {
-            Some(length) => match length.parse() {
-                Ok(length) => length,
-                _          => return Err(format!("'{}' is not a natural number", length).into()),
-            },
-            None => return Err("missing arguments".into()),
+    pub fn new(params: Vec<String>) -> Result<Self, String> {
+        match params.len() {
+            1 => return Err("missing arguments".into()),
+            2 => return Err("missing length".into()),
+            _ => (),
         };
 
-        let filename = match args.next() {
-            Some(filename) => filename.to_string(),
-            None => return Err("missing source".into()),
+        let filename = params[1].clone();
+
+        let length: u32 = match params[2].parse() {
+            Ok(length) => length,
+            _          => return Err(format!("'{}' is not a natural number", params[2]).into()),
         };
 
-        Ok(Config { length, filename })
+        if length < 2 {
+            return Err("the integer must be greater than 1".into())
+        };
+
+        Ok(Config { filename, length })
     }
 }
 
@@ -33,7 +35,7 @@ impl Config {
 pub enum Dialogue {
     Start,
     ReceiveCommand,
-    ReceiveConfig,
+    ExecCommand(Vec<String>),
 }
 
 impl Default for Dialogue {
@@ -47,14 +49,14 @@ pub async fn handle_message(
     dialogue: Dialogue,
 ) -> TransitionOut<Dialogue> {
     match dialogue {
-        Dialogue::Start => Ok(dialogue_start(cx).await?),
-        Dialogue::ReceiveCommand => Ok(dialogue_rec_cmd(cx).await?),
-        Dialogue::ReceiveConfig => Ok(dialogue_rec_cfg(cx).await?),
+        Dialogue::Start => dialogue_start(cx).await,
+        Dialogue::ReceiveCommand => dialogue_rec_cmd(cx).await,
+        Dialogue::ExecCommand(command) => dialogue_ex_cmd(cx, command).await,
     }
 }
 
 async fn dialogue_start(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> TransitionOut<Dialogue> {
-    cx.answer("Welcome! This bot is able to generate some random text based upon other text. You can indicate the source to be imitated and the length of the output. The available commands are:\n/help: print this message\n/generate: generate text")
+    cx.answer("Welcome! This bot is able to generate some random text imitating a source text.\n\nThe available commands are:\n  /help:\n    print this message\n  /generate name n:\n    generate text, where 'name' indicates the source text and 'n' is the word count\n\nThe available source texts are:\n  hpmor:\n    the first chapter of 'Harry Potter and the Methods of Rationality'\n  angelo:\n    the automatically generated subtitles of the YouTube videos of an Italian crackpot")
         .send()
         .await?;
     next(Dialogue::ReceiveCommand)
@@ -68,62 +70,43 @@ async fn dialogue_rec_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> Transitio
                 .await?;
             next(Dialogue::ReceiveCommand)
         },
-        Some(text) => match text.trim() {
-            "/help" | "/start" => {
-                cx.answer("Welcome! This bot is able to generate some random text based upon other text. You can indicate the length of the output and the source to be imitated.\nThe available commands are:\n/help: print this message\n/generate: generate text")
-                    .send()
-                    .await?;
-                next(Dialogue::ReceiveCommand)
-            },
-            "/generate" => {
-                cx.answer("Please input length and source text.\nThe texts currently available are:\n-'angelo': subtitles taken from the YouTube videos of an Italian crackpot\n-'hpmor': the first chapter of 'Harry Potter and the Methods of Rationality'") 
-                    .send()
-                    .await?;
-                next(Dialogue::ReceiveConfig)
-            },
-            _ => {
-                cx.answer("Error: can not parse input. Please try again.")
-                    .send()
-                    .await?;
-                next(Dialogue::ReceiveCommand)
-            },
+        Some(text) => {
+            let command: Vec<String> = text.split_whitespace().map(ToOwned::to_owned).collect();
+            match &(command[0])[..] {
+                "/help" | "/start" => next(Dialogue::Start),
+                "/generate" => next(Dialogue::ExecCommand(command)),
+                _ => {
+                    cx.answer("Error: could not parse input. Please try again.")
+                        .send()
+                        .await?;
+                    next(Dialogue::ReceiveCommand)
+                },
+            }
         },
     }
 }
 
-async fn dialogue_rec_cfg(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> TransitionOut<Dialogue> {
-    match cx.update.text() {
-        Some(input) => {
-            match Config::new(input.to_string()) {
-                Ok(config) => {
-                    if let Ok(text) = fs::read_to_string(config.filename) {
-                        cx.answer(markov::gen_text(&text, config.length))
-                            .send()
-                            .await?;
-                        cx.answer("Waiting for the next command.")
-                            .send()
-                            .await?;
-                        next(Dialogue::ReceiveCommand)
-                    } else {
-                        cx.answer("Error: could not read the specified source. Please try again.")
-                            .send()
-                            .await?;
-                        next(Dialogue::ReceiveConfig)
-                    }
-                },
-                Err(err) => {
-                    cx.answer(format!("Error: {}. Please try again.", err))
-                        .send()
-                        .await?;
-                    next(Dialogue::ReceiveConfig)
-                },
+async fn dialogue_ex_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>, command: Vec<String>) -> TransitionOut<Dialogue> {
+    match Config::new(command) {
+        Ok(config) => {
+            if let Ok(text) = fs::read_to_string(config.filename) {
+                cx.answer(markov::gen_text(&text, config.length))
+                    .send()
+                    .await?;
+                cx.answer("Waiting for the next command.")
+                    .send()
+                    .await?;
+            } else {
+                cx.answer("Error: could not read the specified source. Please try again.")
+                    .send()
+                    .await?;
             }
         },
-        None => {
-            cx.answer("Oh, please, send me a text message!")
+        Err(err) => {
+            cx.answer(format!("Error: {}. Please try again.", err))
                 .send()
                 .await?;
-            next(Dialogue::ReceiveConfig)
         },
-    }
+    };
+    next(Dialogue::ReceiveCommand)
 }

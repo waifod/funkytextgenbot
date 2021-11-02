@@ -9,7 +9,7 @@ async fn main() {
     let bot = Bot::from_env().auto_send();
 
     teloxide::dialogues_repl(bot, |message, dialogue| async move {
-            handle_message(message, dialogue).await.expect("Something wrong with the bot!")
+            handle_message(message, dialogue).await.expect("Something is wrong with the bot!")
         })
         .await;
 }
