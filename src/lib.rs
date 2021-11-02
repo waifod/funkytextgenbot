@@ -35,7 +35,6 @@ impl Config {
 pub enum Dialogue {
     Start,
     ReceiveCommand,
-    ExecCommand(Vec<String>),
 }
 
 impl Default for Dialogue {
@@ -51,7 +50,6 @@ pub async fn handle_message(
     match dialogue {
         Dialogue::Start => dialogue_start(cx).await,
         Dialogue::ReceiveCommand => dialogue_rec_cmd(cx).await,
-        Dialogue::ExecCommand(command) => dialogue_ex_cmd(cx, command).await,
     }
 }
 
@@ -74,7 +72,20 @@ async fn dialogue_rec_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> Transitio
             let command: Vec<String> = text.split_whitespace().map(ToOwned::to_owned).collect();
             match &(command[0])[..] {
                 "/help" | "/start" => next(Dialogue::Start),
-                "/generate" => next(Dialogue::ExecCommand(command)),
+                "/generate" => match cmd_to_text(command) {
+                    Ok(text) => {
+                        cx.answer(text)
+                            .send()
+                            .await?;
+                        next(Dialogue::ReceiveCommand)
+                    },
+                    Err(err) => {
+                        cx.answer(format!("Error: {}. Please try again.", err))
+                            .send()
+                            .await?;
+                        next(Dialogue::ReceiveCommand)
+                    },
+                },
                 _ => {
                     cx.answer("Error: could not parse input. Please try again.")
                         .send()
@@ -86,27 +97,12 @@ async fn dialogue_rec_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> Transitio
     }
 }
 
-async fn dialogue_ex_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>, command: Vec<String>) -> TransitionOut<Dialogue> {
-    match Config::new(command) {
-        Ok(config) => {
-            if let Ok(text) = fs::read_to_string(config.filename) {
-                cx.answer(markov::gen_text(&text, config.length))
-                    .send()
-                    .await?;
-                cx.answer("Waiting for the next command.")
-                    .send()
-                    .await?;
-            } else {
-                cx.answer("Error: could not read the specified source. Please try again.")
-                    .send()
-                    .await?;
-            }
-        },
-        Err(err) => {
-            cx.answer(format!("Error: {}. Please try again.", err))
-                .send()
-                .await?;
-        },
+fn cmd_to_text(command: Vec<String>) -> Result<String, String> {
+    let config = Config::new(command)?;
+    
+    if let Ok(text) = fs::read_to_string(config.filename) {
+        return Ok(markov::gen_text(&text, config.length));
     };
-    next(Dialogue::ReceiveCommand)
+
+    Err("could not read the specified source".into())
 }
