@@ -66,35 +66,36 @@ async fn dialogue_rec_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> Transitio
             cx.answer("Oh, please, send me a text message!")
                 .send()
                 .await?;
-            next(Dialogue::ReceiveCommand)
         },
         Some(text) => {
             let command: Vec<String> = text.split_whitespace().map(ToOwned::to_owned).collect();
             match &(command[0])[..] {
-                "/help" | "/start" => next(Dialogue::Start),
+                "/help" | "/start" => {
+                    cx.answer("Welcome! This bot is able to generate some random text imitating a source text.\n\nThe available commands are:\n  /help:\n    print this message\n  /generate name n:\n    generate text, where 'name' indicates the source text and 'n' is the word count\n\nThe available source texts are:\n  hpmor:\n    the first chapter of 'Harry Potter and the Methods of Rationality'\n  angelo:\n    the automatically generated subtitles of the YouTube videos of an Italian crackpot")
+                        .send()
+                        .await?;
+                },
                 "/generate" => match cmd_to_text(command) {
                     Ok(text) => {
                         cx.answer(text)
                             .send()
                             .await?;
-                        next(Dialogue::ReceiveCommand)
                     },
                     Err(err) => {
                         cx.answer(format!("Error: {}. Please try again.", err))
                             .send()
                             .await?;
-                        next(Dialogue::ReceiveCommand)
                     },
                 },
                 _ => {
                     cx.answer("Error: could not parse input. Please try again.")
                         .send()
                         .await?;
-                    next(Dialogue::ReceiveCommand)
                 },
             }
         },
     }
+    next(Dialogue::ReceiveCommand)
 }
 
 fn cmd_to_text(command: Vec<String>) -> Result<String, String> {
