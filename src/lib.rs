@@ -99,7 +99,7 @@ async fn dialogue_rec_cmd(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> Transitio
 
 fn cmd_to_text(command: Vec<String>) -> Result<String, String> {
     let config = Config::new(command)?;
-    
+
     if let Ok(text) = fs::read_to_string(config.filename) {
         return Ok(markov::gen_text(&text, config.length));
     };

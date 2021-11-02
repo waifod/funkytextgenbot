@@ -30,7 +30,7 @@ fn text_from_table(table: HashMap<(&str, &str), Vec<&str>>, length: u32) -> Stri
 
     let (mut w1, mut w2) = keys[rng.gen_range(0..keys.len())];
 
-    let mut output = format!("{} {}", w1, w2); 
+    let mut output = format!("{} {}", w1, w2);
 
     for _ in 0..length-2 {
         match table.get(&(w1, w2)) {
